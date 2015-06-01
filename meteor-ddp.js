@@ -1,7 +1,7 @@
 /* MeteorDdp - a client for DDP version pre1 */
 
 var MeteorDdp = function(wsUri) {
-  this.VERSIONS = ["pre1"];
+  this.VERSIONS = ["1", "pre2", "pre1"];
 
   this.wsUri = wsUri;
   this.sock;
@@ -72,9 +72,20 @@ MeteorDdp.prototype.connect = function() {
       case 'movedBefore':
         // TODO
         break;
+      case 'ping':
+        self._resolvePing(data);
+        break;
     }
   };
   return conn.promise();
+};
+
+MeteorDdp.prototype._resolvePing = function(data) {
+    var pong = {msg: 'pong'};
+    if (data.hasOwnProperty('id')) { 
+        pong.id = data.id;
+    }
+    this.send(pong);
 };
 
 MeteorDdp.prototype._resolveNoSub = function(data) {
