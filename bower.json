@@ -1,0 +1,23 @@
+{
+  "name": "meteor-ddp",
+  "main": "meteor-ddp.js",
+  "version": "1.0.0",
+  "homepage": "https://github.com/nbento/meteor-ddp",
+  "authors": [
+    "Nuno Bento <ngpbento@gmail.com>"
+  ],
+  "description": "A promise-based Meteor DDP client.",
+  "keywords": [
+    "meteor",
+    "ddp",
+    "javascript"
+  ],
+  "license": "MIT",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ]
+}
