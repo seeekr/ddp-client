@@ -5,10 +5,16 @@ class DDPClient {
     subs = {}         // { pub_name => deferred_id }
     watchers = {}     // { coll_name => [cb1, cb2, ...] }
     collections = {}  // { coll_name => {docId => {doc}, docId => {doc}, ...} }
+    _trackCollections = true
 
     _connectDeferred = null
 
-    constructor(uriOrSocket) {
+    constructor(uriOrSocket, {collections} = {}) {
+        // process opts first so we're ready before connecting
+        if (collections === false) {
+            this._trackCollections = false
+        }
+
         if (typeof uriOrSocket === 'string') {
             this.sock = new WebSocket(uriOrSocket)
         } else {
@@ -32,7 +38,7 @@ class DDPClient {
             if (msg === 'connected') {
                 return d.resolve(data)
             } else if (msg) {
-                const handler = this._messageHandlers[msg]
+                const handler = this['_on' + msg]
                 if (!handler) {
                     console.warn('no handler for message', msg, data)
                     return
@@ -49,92 +55,78 @@ class DDPClient {
         }
     }
 
-    _messageHandlers = {
-        result (data) {
-            if (data.error) {
-                this.defs[data.id].reject(data.error.reason)
-            } else if (typeof data.result !== 'undefined') {
-                this.defs[data.id].resolve(data.result)
-            }
-        },
-        updated(msg) {
-            // TODO method call was acked
-        },
-        changed(msg) {
-            const {collection, id, fields, cleared} = msg
-            const coll = this.collections[collection]
-
-            if (fields) {
-                Object.assign(coll[id], fields)
-            } else if (cleared) {
-                for (let i = 0; i < cleared.length; i++) {
-                    const fieldName = cleared[i]
-                    delete coll[id][fieldName]
-                }
-            }
-
-            const changedDoc = coll[id]
-            this._notifyWatchers(collection, changedDoc, id, msg.msg)
-        },
-        added(msg) {
-            const collName = msg.collection
-            const id = msg.id
-            if (!this.collections[collName]) {
-                this.collections[collName] = {}
-            }
-            /* NOTE: Ordered docs will have a 'before' field containing the id of
-             * the doc after it. If it is the last doc, it will be null.
-             */
-            this.collections[collName][id] = msg.fields
-
-            const changedDoc = this.collections[collName][id]
-            this._notifyWatchers(collName, changedDoc, id, msg.msg)
-        },
-        removed(msg) {
-            const collName = msg.collection
-            const id = msg.id
-            const doc = this.collections[collName][id]
-
-            delete this.collections[collName][id]
-            this._notifyWatchers(collName, doc, id, msg.msg)
-        },
-        ready({subs}) {
-            subs.forEach(id => this.defs[id].resolve())
-        },
-        nosub(data) {
-            if (data.error) {
-                const error = data.error
-                this.defs[data.id].reject(error.reason || 'Subscription not found')
-            } else {
-                this.defs[data.id].resolve()
-            }
-        },
-        movedBefore(data) {
-            // TODO
-        },
-        ping(data) {
-            const pong = {msg: 'pong'}
-            if (data.hasOwnProperty('id')) {
-                pong.id = data.id
-            }
-            this.send(pong)
-        },
+    // -- message handlers --
+    _onresult (data) {
+        if (data.error) {
+            this.defs[data.id].reject(data.error.reason)
+        } else if (typeof data.result !== 'undefined') {
+            this.defs[data.id].resolve(data.result)
+        }
     }
+    _onupdated(msg) {
+        // TODO method call was acked
+    }
+    _onchanged({collection, id, fields, cleared, msg}) {
+        let doc
+        if (this._trackCollections) {
+            doc = this.collections[collection][id]
+            if (fields) { Object.assign(doc, fields) }
+            if (cleared) { cleared.forEach(field => delete doc[field]) }
+        } else {
+            doc = fields
+        }
 
-    _notifyWatchers(collName, changedDoc, docId, message) {
-        changedDoc = JSON.parse(JSON.stringify(changedDoc)) // make a copy
-        changedDoc._id = docId // id might be useful to watchers, attach it.
+        this._notifyWatchers(collection, doc, id, msg)
+    }
+    _onadded({collection, id, fields, msg}) {
+        if (this._trackCollections) {
+            this.collections[collection] = this.collections[collection] || {}
+            this.collections[collection][id] = fields
+        }
+
+        this._notifyWatchers(collection, fields, id, msg)
+    }
+    _onremoved({collection, id, msg}) {
+        let doc = null
+        if (this._trackCollections) {
+            doc = this.collections[collection][id]
+            delete this.collections[collection][id]
+        }
+        this._notifyWatchers(collection, doc, id, msg)
+    }
+    _onready({subs}) {
+        subs.forEach(id => this.defs[id].resolve())
+    }
+    _onnosub({error, id}) {
+        if (error) {
+            this.defs[id].reject(error.reason || 'Subscription not found')
+        } else {
+            this.defs[id].resolve()
+        }
+    }
+    _onmovedBefore(data) {
+        // TODO
+    }
+    _onping({id}) {
+        const pong = {msg: 'pong'}
+        if (id !== undefined) { pong.id = id }
+        this.send(pong)
+    }
+    // -- END message handlers--
+
+    _notifyWatchers(collName, doc, docId, message) {
+        doc = Object.assign({}, doc) // make a copy
+        doc._id = docId // id might be useful to watchers, attach it.
 
         if (!this.watchers[collName]) {
             this.watchers[collName] = []
         }
-        this.watchers[collName].forEach(fn => fn(changedDoc, message))
+        this.watchers[collName].forEach(fn => fn(doc, message))
     }
 
     connect() {
         return this._connectDeferred.promise()
     }
-
 
     _deferredSend(actionType, name, params) {
         const id = this._ids.next()
@@ -190,11 +182,13 @@ class DDPClient {
     }
 
     getCollection(collectionName) {
-        return this.collections[collectionName] || null
+        if (!this._trackCollections) { return null }
+        return this.collections[collectionName]
     }
 
     getDocument(collectionName, docId) {
-        return this.collections[collectionName][docId] || null
+        if (!this._trackCollections) { return null }
+        return this.collections[collectionName][docId]
     }
 
     send(msg) {

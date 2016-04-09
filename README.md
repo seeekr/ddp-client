@@ -11,7 +11,7 @@ Forked from [nbento/meteor-ddp](https://github.com/nbento/meteor-ddp) / [eddflrs
 * Passing an alternative WebSocket implementation is possible, for example to add reconnection behavior. See constructor example below.
 * All code is modern ES6 with a sprinkle of ES7.
 * No Oauth support. (If anyone needs that, feel free to send a PR with modern rewrite of original source.)
-* (TODO) Ability to turn off client side collections. Useful when using DDP for easy message passing between server and client.
+* Ability to turn off client side collections. Useful when using DDP for easy message passing between server and client.
 
 Dependencies
 --------------------
@@ -23,12 +23,22 @@ Methods
 
 All methods return promises if it makes sense and not specified otherwise.
 
-* **constructor(ws)**
+* **constructor(ws, opts)**
 ```js
 // using ws url
 const ddp = new DDPClient('ws://yourApp.meteor.com/websocket')
 // using particular ws impl
 const ddp = new DDPClient(new ReconnectingWebSocket('ws://yourApp.meteor.com/websocket'))
+```
+
+### Options
+```js
+{
+    // turns off/on tracking collection documents locally
+    // beware that watchers may not get the same data passed in depending on this setting
+    // default: true (collection tracking on)
+    collections: false
+}
 ```
 
 * **connect()**

@@ -1,7 +1,7 @@
 {
   "name": "ddp-client",
   "main": "dist/ddp-client.js",
-  "version": "2.0.0",
+  "version": "3.0.0-alpha.1",
   "homepage": "https://github.com/seeekr/ddp-client",
   "authors": [
     "Denis Andrejew <da.colonel@gmail.com>"

@@ -5,11 +5,15 @@ var _createClass = function () { function defineProperties(target, props) { for 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 var DDPClient = function () {
-    // { coll_name => [cb1, cb2, ...] }
-    // { deferred_id => deferred_object }
+    // { coll_name => {docId => {doc}, docId => {doc}, ...} }
+    // { pub_name => deferred_id }
 
     function DDPClient(uriOrSocket) {
-        var _this2 = this;
+        var _this = this;
+
+        var _ref = arguments.length <= 1 || arguments[1] === undefined ? {} : arguments[1];
+
+        var collections = _ref.collections;
 
         _classCallCheck(this, DDPClient);
 
@@ -18,6 +22,7 @@ var DDPClient = function () {
         this.subs = {};
         this.watchers = {};
         this.collections = {};
+        this._trackCollections = true;
         this._connectDeferred = null;
         this._ids = {
             count: 0,
@@ -25,87 +30,11 @@ var DDPClient = function () {
                 return String(++this.count);
             }
         };
-        this._messageHandlers = {
-            result: function result(data) {
-                if (data.error) {
-                    this.defs[data.id].reject(data.error.reason);
-                } else if (typeof data.result !== 'undefined') {
-                    this.defs[data.id].resolve(data.result);
-                }
-            },
-            updated: function updated(msg) {
-                // TODO method call was acked
-            },
-            changed: function changed(msg) {
-                var collection = msg.collection;
-                var id = msg.id;
-                var fields = msg.fields;
-                var cleared = msg.cleared;
 
-                var coll = this.collections[collection];
-
-                if (fields) {
-                    Object.assign(coll[id], fields);
-                } else if (cleared) {
-                    for (var i = 0; i < cleared.length; i++) {
-                        var fieldName = cleared[i];
-                        delete coll[id][fieldName];
-                    }
-                }
-
-                var changedDoc = coll[id];
-                this._notifyWatchers(collection, changedDoc, id, msg.msg);
-            },
-            added: function added(msg) {
-                var collName = msg.collection;
-                var id = msg.id;
-                if (!this.collections[collName]) {
-                    this.collections[collName] = {};
-                }
-                /* NOTE: Ordered docs will have a 'before' field containing the id of
-                 * the doc after it. If it is the last doc, it will be null.
-                 */
-                this.collections[collName][id] = msg.fields;
-
-                var changedDoc = this.collections[collName][id];
-                this._notifyWatchers(collName, changedDoc, id, msg.msg);
-            },
-            removed: function removed(msg) {
-                var collName = msg.collection;
-                var id = msg.id;
-                var doc = this.collections[collName][id];
-
-                delete this.collections[collName][id];
-                this._notifyWatchers(collName, doc, id, msg.msg);
-            },
-            ready: function ready(_ref) {
-                var _this = this;
-
-                var subs = _ref.subs;
-
-                subs.forEach(function (id) {
-                    return _this.defs[id].resolve();
-                });
-            },
-            nosub: function nosub(data) {
-                if (data.error) {
-                    var error = data.error;
-                    this.defs[data.id].reject(error.reason || 'Subscription not found');
-                } else {
-                    this.defs[data.id].resolve();
-                }
-            },
-            movedBefore: function movedBefore(data) {
-                // TODO
-            },
-            ping: function ping(data) {
-                var pong = { msg: 'pong' };
-                if (data.hasOwnProperty('id')) {
-                    pong.id = data.id;
-                }
-                this.send(pong);
-            }
-        };
+        // process opts first so we're ready before connecting
+        if (collections === false) {
+            this._trackCollections = false;
+        }
 
         if (typeof uriOrSocket === 'string') {
             this.sock = new WebSocket(uriOrSocket);
@@ -118,7 +47,7 @@ var DDPClient = function () {
         this.sock.onerror = d.reject.bind(d);
 
         this.sock.onopen = function () {
-            _this2.send({
+            _this.send({
                 msg: 'connect',
                 version: DDPClient.VERSIONS[0],
                 support: DDPClient.VERSIONS
@@ -131,30 +60,142 @@ var DDPClient = function () {
             if (msg === 'connected') {
                 return d.resolve(data);
             } else if (msg) {
-                var handler = _this2._messageHandlers[msg];
+                var handler = _this['_on' + msg];
                 if (!handler) {
                     console.warn('no handler for message', msg, data);
                     return;
                 }
-                handler.call(_this2, data);
+                handler.call(_this, data);
             }
         };
-    } // { coll_name => {docId => {doc}, docId => {doc}, ...} }
-
-    // { pub_name => deferred_id }
+    } // { coll_name => [cb1, cb2, ...] }
+    // { deferred_id => deferred_object }
 
 
     _createClass(DDPClient, [{
+        key: '_onresult',
+
+
+        // -- message handlers --
+        value: function _onresult(data) {
+            if (data.error) {
+                this.defs[data.id].reject(data.error.reason);
+            } else if (typeof data.result !== 'undefined') {
+                this.defs[data.id].resolve(data.result);
+            }
+        }
+    }, {
+        key: '_onupdated',
+        value: function _onupdated(msg) {
+            // TODO method call was acked
+        }
+    }, {
+        key: '_onchanged',
+        value: function _onchanged(_ref2) {
+            var collection = _ref2.collection;
+            var id = _ref2.id;
+            var fields = _ref2.fields;
+            var cleared = _ref2.cleared;
+            var msg = _ref2.msg;
+
+            var doc = void 0;
+            if (this._trackCollections) {
+                doc = this.collections[collection][id];
+                if (fields) {
+                    Object.assign(doc, fields);
+                }
+                if (cleared) {
+                    cleared.forEach(function (field) {
+                        return delete doc[field];
+                    });
+                }
+            } else {
+                doc = fields;
+            }
+
+            this._notifyWatchers(collection, doc, id, msg);
+        }
+    }, {
+        key: '_onadded',
+        value: function _onadded(_ref3) {
+            var collection = _ref3.collection;
+            var id = _ref3.id;
+            var fields = _ref3.fields;
+            var msg = _ref3.msg;
+
+            if (this._trackCollections) {
+                this.collections[collection] = this.collections[collection] || {};
+                this.collections[collection][id] = fields;
+            }
+
+            this._notifyWatchers(collection, fields, id, msg);
+        }
+    }, {
+        key: '_onremoved',
+        value: function _onremoved(_ref4) {
+            var collection = _ref4.collection;
+            var id = _ref4.id;
+            var msg = _ref4.msg;
+
+            var doc = null;
+            if (this._trackCollections) {
+                doc = this.collections[collection][id];
+                delete this.collections[collection][id];
+            }
+            this._notifyWatchers(collection, doc, id, msg);
+        }
+    }, {
+        key: '_onready',
+        value: function _onready(_ref5) {
+            var _this2 = this;
+
+            var subs = _ref5.subs;
+
+            subs.forEach(function (id) {
+                return _this2.defs[id].resolve();
+            });
+        }
+    }, {
+        key: '_onnosub',
+        value: function _onnosub(_ref6) {
+            var error = _ref6.error;
+            var id = _ref6.id;
+
+            if (error) {
+                this.defs[id].reject(error.reason || 'Subscription not found');
+            } else {
+                this.defs[id].resolve();
+            }
+        }
+    }, {
+        key: '_onmovedBefore',
+        value: function _onmovedBefore(data) {
+            // TODO
+        }
+    }, {
+        key: '_onping',
+        value: function _onping(_ref7) {
+            var id = _ref7.id;
+
+            var pong = { msg: 'pong' };
+            if (id !== undefined) {
+                pong.id = id;
+            }
+            this.send(pong);
+        }
+        // -- END message handlers--
+
+    }, {
         key: '_notifyWatchers',
-        value: function _notifyWatchers(collName, changedDoc, docId, message) {
-            changedDoc = JSON.parse(JSON.stringify(changedDoc)); // make a copy
-            changedDoc._id = docId; // id might be useful to watchers, attach it.
+        value: function _notifyWatchers(collName, doc, docId, message) {
+            doc = Object.assign({}, doc); // make a copy
+            doc._id = docId; // id might be useful to watchers, attach it.
 
             if (!this.watchers[collName]) {
                 this.watchers[collName] = [];
             }
             this.watchers[collName].forEach(function (fn) {
-                return fn(changedDoc, message);
+                return fn(doc, message);
             });
         }
     }, {
@@ -231,12 +272,18 @@ var DDPClient = function () {
     }, {
         key: 'getCollection',
         value: function getCollection(collectionName) {
-            return this.collections[collectionName] || null;
+            if (!this._trackCollections) {
+                return null;
+            }
+            return this.collections[collectionName];
         }
     }, {
         key: 'getDocument',
         value: function getDocument(collectionName, docId) {
-            return this.collections[collectionName][docId] || null;
+            if (!this._trackCollections) {
+                return null;
+            }
+            return this.collections[collectionName][docId];
         }
     }, {
         key: 'send',
