@@ -1,100 +1,71 @@
-Meteor-DDP
+ddp-client
 ==========
 
-A promise-based Meteor DDP client for version `pre1` introduced in `Meteor 0.5.7`.
+A modern JS client for Meteor's DDP. Promise-based. Pluggable WebSocket implementation.
+
+Forked from [nbento/meteor-ddp](https://github.com/nbento/meteor-ddp) / [eddflrs/meteor-ddp](https://github.com/eddflrs/meteor-ddp) with the goal of modernizing the source and supporting pluggable websocket implementations like [ReconnectingWebSocket](https://github.com/joewalnes/reconnecting-websocket).
+
+## Differences to original implementation
+* Additional arguments to `call()` and `subscribe()` don't need to be placed in an array, but are passed varargs style.
+* Returned Promises align with standard ES6 Promise spec, i.e. have methods `then` and `catch` instead of `fail` and `success` when relying on $.Deferred.
+* Passing an alternative WebSocket implementation is possible, for example to add reconnection behavior. See constructor example below.
+* All code is modern ES6 with a sprinkle of ES7.
+* No Oauth support. (If anyone needs that, feel free to send a PR with modern rewrite of original source.)
+* (TODO) Ability to turn off client side collections. Useful when using DDP for easy message passing between server and client.
 
 Dependencies
 --------------------
-* jQuery 1.5+ (Uses `$.Deferred`)
+* a `Promise` implementation can be provided by [babel-polyfill](https://www.npmjs.com/package/babel-polyfill), so when in doubt check and/or include that in your build.
 
 
 Methods
 ------------
 
-* **connect()** - Starts a WebSocket connection and lets the server know we're about to talk some DDP. *Returns -> Promise which resolves on succesful connection.*
+All methods return promises if it makes sense and not specified otherwise.
+
+* **constructor(ws)**
+```js
+// using ws url
+const ddp = new DDPClient('ws://yourApp.meteor.com/websocket')
+// using particular ws impl
+const ddp = new DDPClient(new ReconnectingWebSocket('ws://yourApp.meteor.com/websocket'))
+```
+
+* **connect()**
 
 ```js
-var ddp = new MeteorDdp('ws://yourApp.meteor.com/websocket');
-ddp.connect().done(function() {
-  console.log('Connected!');
-});
+ddp.connect().then(() => {
+  console.log('Connected!')
+})
 ```
   
-* **call(methodName, [params, ...])** - Does a Remote Procedure Call on any method exposed through `Meteor.methods` on the server. *Returns -> Promise which resolves with any returned data.*
+* **call(methodName, param1, ...)** - Does a Remote Procedure Call on any method exposed through `Meteor.methods` on the server.
 
 ```js
-/* Lets say we can RPC a createPlayer method which returns a playerId. Lets also say 
-   that we need the playerId in order to join a game (via a joinGame method 
-   which returns a gameId). Here's a couple of ways to do this with promises: 
-*/
-
-// Using the done method...
-var createPlayer = ddp.call('createPlayer');
-createPlayer.done(function(playerId) {
-  var joinGame = ddp.call('joinGame', [playerId]);
-  joinGame.done(function(gameId) {
-    console.log("We joined a game, here's the game id: ", gameId);
-  });
-});
-
-// We can pipe it... (Note: pipe is deprecated as of jQuery 1.8)
-var createPlayer = ddp.call('createPlayer');
-var joinGame = createPlayer.pipe(function(playerId) {
-  return ddp.call('joinGame', [playerId]);
-});
-joinGame.done(function(gameId) {
-  console.log('We joined a game: ', gameId);
-});
-
-// We can use when...then...
-$.when(ddp.call('createPlayer')).then(function(playerId) {
-  ddp.call('joinGame', [playerId]).done(function(gameId) {
-    console.log('We joined a game! Game id: ', gameId);
-  });
-});
+ddp.call('ping', 123, 234).then(res => console.log(res))
 ```
 
-* **subscribe(subscriptionName, [params, ...])** - Subscribes to data published on the server. You can observe changes on a collection by using the 'watch' method. *Returns -> Promise which resolves on successful subscription and fails otherwise.*
+* **subscribe(subscriptionName, param1, ...)** - Subscribes to data published on the server. You can observe changes on a collection by using the 'watch' method. Returned promise is resolved when subscription is ready.
+
+* **unsubscribe(subscriptionName)** - Unsubscribes to data published on the server. Leaves local collection intact.
+
+* **watch(collectionName, callback)** - Observe a collection and be notified whenever that collection changes via your callback. A copy of the modified document will be sent as argument to the callback. Returns nothing.
 
 ```js
-// Subscribing returns a promise which resolved on success, but 
-// you probably only care if the subscription fails...
-ddp.subscribe('plyers', [gameId]).fail(function(err) {
-  console.log('We actually wanted to subscribe to players not plyers...');
-});
-```
-
-* **unsubscribe(subscriptionName)** - Unsubscribes to data published on the server. Leaves local collection intact. *Returns -> Promise which resolves on successful unsubscription and fails if something went wrong in the process or subscription never existed.*
-
-```js
-var unsubPlayers = ddp.unsubscribe('players');
-unsubPlayers.done(function() {
-  console.log("Successfully unsubscribed to players");
-});
-unsubPlayers.fail(function(err) {
-  console.log("Something went wrong, couldn't unsub players. ", err);
-});
-```
-
-* **watch(collectionName, callback)** - Observe a collection and be notified whenever that collection changes via your callback. A copy of the modified document will be sent as argument to the callback. *Returns -> void*
-
-```js
-// So say we subscribed to the `players` collection and want to be notified when any change occurs:
-ddp.watch('players', function(changedDoc, message) {
-  console.log("The players collection changed. Here's what changed: ", changedDoc, message);
+ddp.watch('players', (changedDoc, message) => {
+  console.log('players collection item changed', changedDoc, message)
 
   // Was it removed?
-  if (message === "removed") {
-    console.log("This document doesn't exist in our collection anymore :(");
+  if (message === 'removed') {
+    console.log('document removed from local collection!')
   }
-
-});
+})
 ```
 
 * **getCollection(collectionName)** - *Returns -> An Object containing the locally stored collection.*
 
 ```js
-ddp.getCollection('rooms'); // -> {id1: {document1}, id2: {document2}, ...}
+ddp.getCollection('rooms') // -> {id1: {document1}, id2: {document2}, ...}
 ```
 
 * **getDocument(collectionName, documentId)** - *Returns -> The document with specified documentId belonging to collectionName.*
@@ -103,41 +74,12 @@ ddp.getCollection('rooms'); // -> {id1: {document1}, id2: {document2}, ...}
 ddp.getDocument('rooms', '4ec81e1b-2e16-42f4-a915-cc18ad7bdb0c') // -> {document}
 ```
 
-* **close()** - Closes the WebSocket connection. *Returns -> void*
+* **close()** - Closes the WebSocket connection.
 
-```js
-ddp.close(); // yeah...
-```
+# No Oauth support
 
-# Oauth Methods
+There is no Oauth support in this release. I do not need it and as such did not invest the effort to bring that code up to date as well.
 
-* **loginWithOauth(oauthLoginUrl)** - Log into meteor with oauth. *Returns -> Promise which resolves on login.*
+# Acknowledgements
 
-```js
-ddp.loginWithOauth(
-    //setup the twitter oauth login url
-    function (credentialToken) {
-        var callbackUrl = "http://localhost:3000/_oauth/twitter?close&state=" + credentialToken;
-
-        var loginUrl = "http://localhost:3000/_oauth/twitter/?requestTokenAndRedirect="
-            + encodeURIComponent(callbackUrl)
-            + "&state=" + credentialToken;
-
-        return loginUrl;
-    }
-).then(function () {
-     console.log("We are logged in.");
-  });
-```
-
-* **logout()** - Logout from meteor. *Returns -> Promise which resolves on logout.*
-
-```js
-ddp.logout();
-```
-
-* **oauthPrompt(timeoutInSeconds)** - Reopen the oauth prompt. This re-authorizes with your oauth provider, unlike loginWithOauth which just makes sure the user is authenticated with meteor. *Returns -> Promise which resolves on login.*
-
-```js
-ddp.oauthPrompt();
-```
+Thanks to [Eddie Flores](https://github.com/eddflrs) and [nbento](https://github.com/nbento) for the original code!
