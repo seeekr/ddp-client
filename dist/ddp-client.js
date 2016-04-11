@@ -248,18 +248,15 @@ var DDPClient = function () {
     }, {
         key: 'unsubscribe',
         value: function unsubscribe(pubName) {
-            this.defs[id] = new DDPClient.Deferred();
-            if (!this.subs[pubName]) {
-                this.defs[id].reject(pubName + " was never subscribed");
-            } else {
-                var _id = this.subs[pubName];
-                var o = {
-                    msg: 'unsub',
-                    id: _id
-                };
-                this.send(o);
+            var id = this.subs[pubName];
+            if (!id) {
+                return Promise.reject(pubName + " was never subscribed");
             }
-            return this.defs[id].promise();
+            this.send({
+                msg: 'unsub',
+                id: id
+            });
+            return (this.defs[id] = new DDPClient.Deferred()).promise();
         }
     }, {
         key: 'watch',

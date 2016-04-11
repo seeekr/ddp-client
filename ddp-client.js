@@ -160,18 +160,15 @@ class DDPClient {
     }
 
     unsubscribe(pubName) {
-        this.defs[id] = new DDPClient.Deferred()
-        if (!this.subs[pubName]) {
-            this.defs[id].reject(pubName + " was never subscribed")
-        } else {
-            const id = this.subs[pubName]
-            const o = {
-                msg: 'unsub',
-                id: id
-            }
-            this.send(o)
+        const id = this.subs[pubName]
+        if (!id) {
+            return Promise.reject(pubName + " was never subscribed")
         }
-        return this.defs[id].promise()
+        this.send({
+            msg: 'unsub',
+            id,
+        })
+        return (this.defs[id] = new DDPClient.Deferred()).promise()
     }
 
     watch(collectionName, cb) {
