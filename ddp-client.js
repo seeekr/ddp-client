@@ -36,6 +36,7 @@ class DDPClient {
         this.sock.onmessage = (wsMessage) => {
             const data = JSON.parse(wsMessage.data), {msg} = data
             if (msg === 'connected') {
+                this.sessionId = data.session
                 return d.resolve(data)
             } else if (msg) {
                 const handler = this['_on' + msg]
